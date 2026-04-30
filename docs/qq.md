@@ -64,6 +64,9 @@ type = "qq"
 ws_url = "ws://127.0.0.1:3001"  # NapCat 正向 WebSocket 地址
 token = ""                       # 可选：Access Token（需与 NapCat 一致）
 allow_from = "*"                 # 允许交互的 QQ 号，"*" 表示所有人
+group_reply_all = false           # false: 群聊必须 @机器人 才响应；true: 群聊所有消息都响应
+group_context_messages = 10       # @触发时附带最近 N 条未发送过的群消息；0 表示禁用
+group_context_max_chars = 2000    # 最近群消息上下文最大字符数；0 表示不限制
 ```
 
 **`allow_from` 配置说明 / `allow_from` options:**
@@ -89,9 +92,13 @@ Now you can chat with the bot via QQ private or group messages!
 
 ## 群聊使用 / Group Chat
 
-支持群聊消息。在群中发送消息时，机器人会以独立的会话（按用户区分）处理每个人的请求。
+支持群聊消息。默认会保持旧行为，响应群内所有允许用户的消息。设置 `group_reply_all = false` 后，群聊只有 @机器人 的消息会触发处理。
 
-Group chat is supported. Each user gets their own independent session, even in group chats.
+Group chat is supported. By default, QQ keeps the previous behavior and responds to all allowed group messages. Set `group_reply_all = false` to require @mention in groups.
+
+如果启用 `group_context_messages`，QQ 适配器会缓存未触发机器人的普通群消息，并在下一次 @触发时作为 `ExtraContent` 附加给 Agent。每个 session 会记录已注入到 Agent 的最高上下文序号，后续 @不会重复注入同一批群消息，从而节省 token。
+
+When `group_context_messages` is enabled, the QQ adapter caches non-triggering group messages and injects recent messages as `ExtraContent` on the next @mention. Each session tracks the highest injected context sequence, so the same group messages are not repeatedly sent to the agent.
 
 ## 支持的消息类型 / Supported Message Types
 
@@ -100,7 +107,7 @@ Group chat is supported. Each user gets their own independent session, even in g
 | 文字 / Text | ✅ | ✅ |
 | 图片 / Image | ✅ | ❌ (文本描述) |
 | 语音 / Voice | ✅ (需配置 STT) | ❌ |
-| @提及 / @mention | ✅ (忽略) | — |
+| @提及 / @mention | ✅ (可用于群聊触发) | — |
 
 ## 常见问题 / FAQ
 

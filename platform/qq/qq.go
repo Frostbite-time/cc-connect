@@ -29,7 +29,10 @@ type Platform struct {
 	wsURL                 string // e.g. "ws://127.0.0.1:3001"
 	token                 string // optional access_token
 	allowFrom             string // comma-separated user IDs or "*"
+	groupReplyAll         bool
 	shareSessionInChannel bool
+	groupContextMessages  int
+	groupContextMaxChars  int
 	handler               core.MessageHandler
 	conn                  *websocket.Conn
 	mu                    sync.Mutex
@@ -39,6 +42,22 @@ type Platform struct {
 	selfID                int64
 	dedup                 core.MessageDedup
 	groupNameCache        sync.Map // groupID -> group name
+	groupContextMu        sync.Mutex
+	groupContextSeq       uint64
+	groupContext          map[int64][]groupContextItem
+	groupContextLastSeq   map[string]uint64
+}
+
+const (
+	defaultGroupContextMaxChars = 2000
+	maxGroupContextHistory      = 200
+)
+
+type groupContextItem struct {
+	seq      uint64
+	userID   int64
+	userName string
+	text     string
 }
 
 func New(opts map[string]any) (core.Platform, error) {
@@ -48,14 +67,29 @@ func New(opts map[string]any) (core.Platform, error) {
 	}
 	token, _ := opts["token"].(string)
 	allowFrom, _ := opts["allow_from"].(string)
+	groupReplyAll := true
+	if v, ok := opts["group_reply_all"].(bool); ok {
+		groupReplyAll = v
+	}
 	shareSessionInChannel, _ := opts["share_session_in_channel"].(bool)
+	groupContextMessages := intOption(opts, "group_context_messages", 0)
+	if groupContextMessages < 0 {
+		groupContextMessages = 0
+	}
+	groupContextMaxChars := intOption(opts, "group_context_max_chars", defaultGroupContextMaxChars)
+	if groupContextMaxChars < 0 {
+		groupContextMaxChars = 0
+	}
 
 	core.CheckAllowFrom("qq", allowFrom)
 	return &Platform{
 		wsURL:                 wsURL,
 		token:                 token,
 		allowFrom:             allowFrom,
+		groupReplyAll:         groupReplyAll,
 		shareSessionInChannel: shareSessionInChannel,
+		groupContextMessages:  groupContextMessages,
+		groupContextMaxChars:  groupContextMaxChars,
 	}, nil
 }
 
@@ -84,6 +118,9 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 		}
 		nick, _ := info["nickname"].(string)
 		slog.Info("qq: logged in", "qq", p.selfID, "nickname", nick)
+	}
+	if !p.groupReplyAll && p.selfID == 0 {
+		slog.Warn("qq: group_reply_all=false requires get_login_info to return bot user_id for @ detection")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -201,6 +238,15 @@ func (p *Platform) handleMessage(payload map[string]any) {
 		return
 	}
 
+	directedAtBot := false
+	if msgType == "group" {
+		directedAtBot = p.isDirectedAtBot(payload)
+		if !p.groupReplyAll && !directedAtBot {
+			p.recordGroupContext(groupID, userID, userName, text)
+			return
+		}
+	}
+
 	var sessionKey string
 	if msgType == "group" {
 		if p.shareSessionInChannel {
@@ -224,17 +270,23 @@ func (p *Platform) handleMessage(payload map[string]any) {
 		chatName = p.resolveGroupName(groupID)
 	}
 
+	extraContent := ""
+	if msgType == "group" && !p.groupReplyAll && directedAtBot {
+		extraContent = p.buildRecentGroupContext(groupID, sessionKey)
+	}
+
 	msg := &core.Message{
-		SessionKey: sessionKey,
-		Platform:   "qq",
-		MessageID:  strconv.FormatInt(messageID, 10),
-		UserID:     strconv.FormatInt(userID, 10),
-		UserName:   userName,
-		ChatName:   chatName,
-		Content:    text,
-		Images:     images,
-		Audio:      audio,
-		ReplyCtx:   rctx,
+		SessionKey:   sessionKey,
+		Platform:     "qq",
+		MessageID:    strconv.FormatInt(messageID, 10),
+		UserID:       strconv.FormatInt(userID, 10),
+		UserName:     userName,
+		ChatName:     chatName,
+		Content:      text,
+		Images:       images,
+		Audio:        audio,
+		ExtraContent: extraContent,
+		ReplyCtx:     rctx,
 	}
 
 	slog.Debug("qq: message received", "type", msgType, "user", userID, "text_len", len(text))
@@ -309,6 +361,101 @@ func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAtt
 	}
 
 	return strings.TrimSpace(strings.Join(textParts, "")), images, audio
+}
+
+func (p *Platform) isDirectedAtBot(payload map[string]any) bool {
+	if p.selfID == 0 {
+		return false
+	}
+	self := strconv.FormatInt(p.selfID, 10)
+	switch msg := payload["message"].(type) {
+	case []any:
+		for _, seg := range msg {
+			s, ok := seg.(map[string]any)
+			if !ok {
+				continue
+			}
+			segType, _ := s["type"].(string)
+			if segType != "at" {
+				continue
+			}
+			data, _ := s["data"].(map[string]any)
+			if valueString(data["qq"]) == self {
+				return true
+			}
+		}
+	}
+	if raw, ok := payload["raw_message"].(string); ok {
+		return rawMessageMentions(raw, self)
+	}
+	return false
+}
+
+func (p *Platform) recordGroupContext(groupID int64, userID int64, userName, text string) {
+	text = strings.TrimSpace(text)
+	if p.groupContextMessages <= 0 || groupID == 0 || text == "" {
+		return
+	}
+
+	p.groupContextMu.Lock()
+	defer p.groupContextMu.Unlock()
+	if p.groupContext == nil {
+		p.groupContext = make(map[int64][]groupContextItem)
+	}
+	p.groupContextSeq++
+	p.groupContext[groupID] = append(p.groupContext[groupID], groupContextItem{
+		seq:      p.groupContextSeq,
+		userID:   userID,
+		userName: userName,
+		text:     text,
+	})
+
+	limit := maxGroupContextHistory
+	if p.groupContextMessages*4 > limit {
+		limit = p.groupContextMessages * 4
+	}
+	items := p.groupContext[groupID]
+	if len(items) > limit {
+		p.groupContext[groupID] = items[len(items)-limit:]
+	}
+}
+
+func (p *Platform) buildRecentGroupContext(groupID int64, sessionKey string) string {
+	if p.groupContextMessages <= 0 || groupID == 0 || sessionKey == "" {
+		return ""
+	}
+
+	p.groupContextMu.Lock()
+	lastSeq := p.groupContextLastSeq[sessionKey]
+	history := p.groupContext[groupID]
+	items := make([]groupContextItem, 0, p.groupContextMessages)
+	for i := len(history) - 1; i >= 0 && len(items) < p.groupContextMessages; i-- {
+		item := history[i]
+		if item.seq <= lastSeq {
+			continue
+		}
+		items = append(items, item)
+	}
+	p.groupContextMu.Unlock()
+
+	if len(items) == 0 {
+		return ""
+	}
+	reverseGroupContextItems(items)
+	contextText, maxSeq := formatGroupContext(items, p.groupContextMaxChars)
+	if maxSeq == 0 {
+		return ""
+	}
+
+	p.groupContextMu.Lock()
+	if p.groupContextLastSeq == nil {
+		p.groupContextLastSeq = make(map[string]uint64)
+	}
+	if p.groupContextLastSeq[sessionKey] < maxSeq {
+		p.groupContextLastSeq[sessionKey] = maxSeq
+	}
+	p.groupContextMu.Unlock()
+	return contextText
 }
 
 // Reply sends a message as a reply to an incoming message.
@@ -496,6 +643,144 @@ func (p *Platform) isAllowed(userID int64) bool {
 		}
 	}
 	return false
+}
+
+func intOption(opts map[string]any, key string, fallback int) int {
+	switch v := opts[key].(type) {
+	case int:
+		return v
+	case int8:
+		return int(v)
+	case int16:
+		return int(v)
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case uint:
+		return int(v)
+	case uint8:
+		return int(v)
+	case uint16:
+		return int(v)
+	case uint32:
+		return int(v)
+	case uint64:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			return int(n)
+		}
+	}
+	return fallback
+}
+
+func valueString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		return strconv.FormatInt(int64(x), 10)
+	case json.Number:
+		if n, err := x.Int64(); err == nil {
+			return strconv.FormatInt(n, 10)
+		}
+	case int:
+		return strconv.Itoa(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case uint64:
+		return strconv.FormatUint(x, 10)
+	}
+	return ""
+}
+
+func rawMessageMentions(raw, qq string) bool {
+	if raw == "" || qq == "" {
+		return false
+	}
+	for {
+		idx := strings.Index(raw, "[CQ:at,")
+		if idx < 0 {
+			return false
+		}
+		end := strings.Index(raw[idx:], "]")
+		if end < 0 {
+			return false
+		}
+		code := raw[idx : idx+end+1]
+		target := "qq=" + qq
+		if strings.Contains(code, target+",") || strings.Contains(code, target+"]") {
+			return true
+		}
+		raw = raw[idx+end+1:]
+	}
+}
+
+func reverseGroupContextItems(items []groupContextItem) {
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
+}
+
+func formatGroupContext(items []groupContextItem, maxChars int) (string, uint64) {
+	const header = "Recent QQ group messages not previously sent to the agent:"
+	lines := make([]string, 0, len(items))
+	total := len([]rune(header))
+	var maxSeq uint64
+
+	for i := len(items) - 1; i >= 0; i-- {
+		line := formatGroupContextLine(items[i])
+		lineLen := len([]rune(line)) + 1
+		if maxChars > 0 && total+lineLen > maxChars {
+			if len(lines) == 0 {
+				remaining := maxChars - total - 1
+				if remaining <= 0 {
+					break
+				}
+				line = truncateRunes(line, remaining)
+			} else {
+				break
+			}
+		}
+		lines = append(lines, line)
+		total += len([]rune(line)) + 1
+		if items[i].seq > maxSeq {
+			maxSeq = items[i].seq
+		}
+	}
+	if len(lines) == 0 {
+		return "", 0
+	}
+	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+		lines[i], lines[j] = lines[j], lines[i]
+	}
+	return header + "\n" + strings.Join(lines, "\n"), maxSeq
+}
+
+func formatGroupContextLine(item groupContextItem) string {
+	name := strings.TrimSpace(item.userName)
+	if name == "" {
+		name = strconv.FormatInt(item.userID, 10)
+	}
+	text := strings.Join(strings.Fields(item.text), " ")
+	return fmt.Sprintf("- %s (%d): %s", name, item.userID, text)
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-3]) + "..."
 }
 
 func jsonInt64(m map[string]any, key string) int64 {

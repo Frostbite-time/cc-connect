@@ -422,6 +422,8 @@ type = "qq"
 ws_url = "ws://127.0.0.1:3001"  # NapCat Forward WebSocket URL
 token = ""                       # optional: access_token (must match NapCat config)
 allow_from = "*"                 # allowed QQ user IDs: "12345,67890" or "*" for all
+group_reply_all = false           # require @bot in QQ groups
+group_context_messages = 10       # include recent non-trigger group messages on @mention; 0 disables
 ```
 
 **Detailed guide:** [docs/qq.md](docs/qq.md)

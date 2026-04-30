@@ -1285,6 +1285,12 @@ app_secret = "your-feishu-app-secret"
 # token = ""                       # optional: access_token / 可选鉴权 token
 # allow_from = "*"                 # allowed QQ user IDs, e.g. "12345,67890" or "*" for all
 #                                  # 允许的 QQ 号，如 "12345,67890"，"*" 表示所有
+# group_reply_all = true            # default true preserves existing QQ behavior; set false to require @bot in groups
+#                                  # 默认 true 保持现有 QQ 行为；设为 false 后群聊必须 @机器人 才响应
+# group_context_messages = 0        # when group_reply_all=false, include up to N recent non-trigger group messages; 0 disables
+#                                  # group_reply_all=false 时，携带最多 N 条最近的非触发群消息；0 禁用
+# group_context_max_chars = 2000    # max characters for injected recent group context; 0 = unlimited
+#                                  # 注入最近群消息上下文的最大字符数；0 表示不限制
 # share_session_in_channel = false  # If true, all users in a group share one agent session / 群聊共享会话
 
 # QQ Bot (Official / 官方 QQ 机器人) (uncomment to enable / 取消注释以启用)
