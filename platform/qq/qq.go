@@ -111,6 +111,11 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 
 	slog.Info("qq: connected to OneBot", "url", p.wsURL)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	p.cancel = cancel
+
+	go p.readLoop(ctx)
+
 	// Get bot self info
 	if info, err := p.callAPI("get_login_info", nil); err == nil {
 		if uid, ok := info["user_id"].(float64); ok {
@@ -118,15 +123,12 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 		}
 		nick, _ := info["nickname"].(string)
 		slog.Info("qq: logged in", "qq", p.selfID, "nickname", nick)
+	} else {
+		slog.Warn("qq: get_login_info failed", "error", err)
 	}
 	if !p.groupReplyAll && p.selfID == 0 {
 		slog.Warn("qq: group_reply_all=false requires get_login_info to return bot user_id for @ detection")
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	p.cancel = cancel
-
-	go p.readLoop(ctx)
 
 	return nil
 }
@@ -167,7 +169,7 @@ func (p *Platform) readLoop(ctx context.Context) {
 		// Otherwise it's an event
 		postType, _ := payload["post_type"].(string)
 		if postType == "message" {
-			p.handleMessage(payload)
+			go p.handleMessage(payload)
 		}
 	}
 }

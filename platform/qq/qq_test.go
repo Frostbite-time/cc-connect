@@ -1,12 +1,16 @@
 package qq
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/chenhg5/cc-connect/core"
+	"github.com/gorilla/websocket"
 )
 
 func TestPlatform_Name(t *testing.T) {
@@ -108,6 +112,156 @@ func TestNew_QQGroupReplyAllDefaultsToExistingBehavior(t *testing.T) {
 	platform := p.(*Platform)
 	if !platform.groupReplyAll {
 		t.Error("groupReplyAll = false, want true")
+	}
+}
+
+func TestStartGetsSelfIDForMentionFiltering(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var req map[string]any
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Errorf("invalid API request: %v", err)
+			return
+		}
+		if req["action"] != "get_login_info" {
+			t.Errorf("action = %v, want get_login_info", req["action"])
+			return
+		}
+		if err := conn.WriteJSON(map[string]any{
+			"status":  "ok",
+			"retcode": 0,
+			"echo":    req["echo"],
+			"data": map[string]any{
+				"user_id":  float64(42),
+				"nickname": "bot",
+			},
+		}); err != nil {
+			return
+		}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	p, err := New(map[string]any{
+		"ws_url":          wsURL,
+		"group_reply_all": false,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	platform := p.(*Platform)
+	if err := platform.Start(func(core.Platform, *core.Message) {}); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer platform.Stop()
+
+	if platform.selfID != 42 {
+		t.Fatalf("selfID = %d, want 42", platform.selfID)
+	}
+}
+
+func TestReadLoopKeepsReadingDuringGroupInfoLookup(t *testing.T) {
+	handled := make(chan *core.Message, 1)
+	sendGroup := make(chan struct{})
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var loginReq map[string]any
+		if err := json.Unmarshal(raw, &loginReq); err != nil {
+			t.Errorf("invalid login request: %v", err)
+			return
+		}
+		if err := conn.WriteJSON(map[string]any{
+			"status":  "ok",
+			"retcode": 0,
+			"echo":    loginReq["echo"],
+			"data": map[string]any{
+				"user_id":  float64(42),
+				"nickname": "bot",
+			},
+		}); err != nil {
+			return
+		}
+
+		<-sendGroup
+		if err := conn.WriteJSON(qqPayload(1, 100, 7, "alice", []any{
+			qqAt(42),
+			qqText(" hello"),
+		})); err != nil {
+			return
+		}
+
+		_, raw, err = conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var groupReq map[string]any
+		if err := json.Unmarshal(raw, &groupReq); err != nil {
+			t.Errorf("invalid group info request: %v", err)
+			return
+		}
+		if groupReq["action"] != "get_group_info" {
+			t.Errorf("action = %v, want get_group_info", groupReq["action"])
+			return
+		}
+		if err := conn.WriteJSON(map[string]any{
+			"status":  "ok",
+			"retcode": 0,
+			"echo":    groupReq["echo"],
+			"data": map[string]any{
+				"group_name": "Test Group",
+			},
+		}); err != nil {
+			return
+		}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	p, err := New(map[string]any{
+		"ws_url":          wsURL,
+		"group_reply_all": false,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	platform := p.(*Platform)
+	if err := platform.Start(func(_ core.Platform, msg *core.Message) {
+		handled <- msg
+	}); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer platform.Stop()
+	close(sendGroup)
+
+	select {
+	case msg := <-handled:
+		if msg.ChatName != "Test Group" {
+			t.Fatalf("ChatName = %q, want Test Group", msg.ChatName)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("group message was not handled; readLoop likely blocked on API response")
 	}
 }
 
