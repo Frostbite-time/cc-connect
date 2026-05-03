@@ -59,7 +59,7 @@ func TestOpencodeSessionEntry_Unmarshal(t *testing.T) {
 // the ContinueSession sentinel (__continue__) is not passed as a literal
 // session ID to the CLI. This was fixed in PR #249.
 func TestNewOpencodeSession_ContinueSessionTreatedAsFresh(t *testing.T) {
-	s, err := newOpencodeSession(context.Background(), "echo", "/tmp", "", "default", core.ContinueSession, nil)
+	s, err := newOpencodeSession(context.Background(), "echo", "/tmp", "", "", "default", core.ContinueSession, nil)
 	if err != nil {
 		t.Fatalf("newOpencodeSession: %v", err)
 	}
@@ -116,6 +116,58 @@ func TestOpencodeSessionBuildRunArgsIncludesImagesAsFiles(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+}
+
+func TestOpencodeSessionBuildRunArgsIncludesAgent(t *testing.T) {
+	s := &opencodeSession{workDir: "/repo", agent: "cersei"}
+
+	got := s.buildRunArgs("who are you", nil, "")
+	want := []string{
+		"run", "--format", "json",
+		"--agent", "cersei",
+		"--dir", "/repo",
+		"--thinking",
+		"--", "who are you",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseOpencodeAgentList(t *testing.T) {
+	out := []byte(`build (primary)
+  [
+  {
+    "permission": "*"
+  }
+]
+explore (subagent)
+qqbot (primary)
+`)
+
+	got := parseOpencodeAgentList(out)
+	want := []core.AgentProfileInfo{
+		{Name: "build", Kind: "primary"},
+		{Name: "explore", Kind: "subagent"},
+		{Name: "qqbot", Kind: "primary"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("profiles = %#v, want %#v", got, want)
+	}
+}
+
+func TestResolveInitialAgentProfileUsesProjectDefault(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(`{"default_agent":"qqbot"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := resolveInitialAgentProfile(dir, ""); got != "qqbot" {
+		t.Fatalf("profile = %q, want qqbot", got)
+	}
+	if got := resolveInitialAgentProfile(dir, "cersei"); got != "cersei" {
+		t.Fatalf("explicit profile = %q, want cersei", got)
 	}
 }
 

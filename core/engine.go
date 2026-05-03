@@ -168,6 +168,7 @@ type Engine struct {
 	providerRefsSaveFunc    func(refs []string) error
 	listGlobalProvidersFunc func(agentType string) ([]ProviderConfig, error)
 	modelSaveFunc           func(model string) error
+	agentProfileSaveFunc    func(profile string) error
 
 	ttsSaveFunc func(mode string) error
 
@@ -197,16 +198,16 @@ type Engine struct {
 	userRoles    *UserRoleManager // nil = legacy mode (no per-user policies)
 	userRolesMu  sync.RWMutex     // protects userRoles, disabledCmds, and adminFrom
 
-	rateLimiter      *RateLimiter
-	outgoingRL       *OutgoingRateLimiter
-	streamPreview    StreamPreviewCfg
-	references       ReferenceRenderCfg
-	relayManager     *RelayManager
-	eventIdleTimeout time.Duration
+	rateLimiter       *RateLimiter
+	outgoingRL        *OutgoingRateLimiter
+	streamPreview     StreamPreviewCfg
+	references        ReferenceRenderCfg
+	relayManager      *RelayManager
+	eventIdleTimeout  time.Duration
 	maxQueuedMessages int
-	dirHistory       *DirHistory
-	baseWorkDir      string
-	projectState     *ProjectStateStore
+	dirHistory        *DirHistory
+	baseWorkDir       string
+	projectState      *ProjectStateStore
 
 	// Auto-compress settings
 	autoCompressEnabled   bool
@@ -404,7 +405,7 @@ func NewEngine(name string, ag Agent, platforms []Platform, sessionStorePath str
 		streamPreview:         DefaultStreamPreviewCfg(),
 		references:            DefaultReferenceRenderCfg(),
 		eventIdleTimeout:      defaultEventIdleTimeout,
-		maxQueuedMessages:    defaultMaxQueuedMessages,
+		maxQueuedMessages:     defaultMaxQueuedMessages,
 		showContextIndicator:  true,
 	}
 
@@ -655,6 +656,10 @@ func (e *Engine) SetListGlobalProvidersFunc(fn func(agentType string) ([]Provide
 
 func (e *Engine) SetModelSaveFunc(fn func(model string) error) {
 	e.modelSaveFunc = fn
+}
+
+func (e *Engine) SetAgentProfileSaveFunc(fn func(profile string) error) {
+	e.agentProfileSaveFunc = fn
 }
 
 // AddPlatform appends a platform to the engine after construction.
@@ -3820,6 +3825,7 @@ var builtinCommands = []struct {
 	{[]string{"usage", "quota"}, "usage"},
 	{[]string{"history"}, "history"},
 	{[]string{"allow"}, "allow"},
+	{[]string{"agent"}, "agent"},
 	{[]string{"model"}, "model"},
 	{[]string{"reasoning", "effort"}, "reasoning"},
 	{[]string{"mode"}, "mode"},
@@ -3987,6 +3993,8 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		e.cmdHistory(p, msg, args)
 	case "allow":
 		e.cmdAllow(p, msg, args)
+	case "agent":
+		e.cmdAgent(p, msg, args)
 	case "model":
 		e.cmdModel(p, msg, args)
 	case "reasoning":
@@ -6492,6 +6500,131 @@ func (e *Engine) cmdModel(p Platform, msg *Message, args []string) {
 	sessions.Save()
 
 	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgModelChanged, target))
+}
+
+func (e *Engine) cmdAgent(p Platform, msg *Message, args []string) {
+	agent, sessions, interactiveKey, err := e.commandContext(p, msg)
+	if err != nil {
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgWsResolutionError, err))
+		return
+	}
+
+	switcher, ok := agent.(AgentProfileSwitcher)
+	if !ok {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgAgentProfileNotSupported))
+		return
+	}
+
+	if len(args) == 0 || strings.EqualFold(args[0], "list") {
+		e.reply(p, msg.ReplyCtx, e.agentProfilesText(switcher))
+		return
+	}
+
+	target, ok := parseAgentProfileSwitchArgs(args)
+	if !ok {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgAgentProfileUsage))
+		return
+	}
+
+	if target != "" {
+		if profiles, err := e.listAgentProfiles(switcher); err == nil && len(profiles) > 0 {
+			resolved := ""
+			for _, profile := range profiles {
+				if strings.EqualFold(profile.Name, target) {
+					resolved = profile.Name
+					break
+				}
+			}
+			if resolved == "" {
+				e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgAgentProfileNotFound, target))
+				return
+			}
+			target = resolved
+		}
+	}
+
+	if agent == e.agent && e.agentProfileSaveFunc != nil {
+		if err := e.agentProfileSaveFunc(target); err != nil {
+			e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgAgentProfileChangeFailed, err))
+			return
+		}
+	}
+
+	switcher.SetAgentProfile(target)
+	e.cleanupInteractiveState(interactiveKey)
+	s := sessions.GetOrCreateActive(msg.SessionKey)
+	s.SetAgentSessionID("", "")
+	s.ClearHistory()
+	sessions.Save()
+
+	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgAgentProfileChanged, e.agentProfileDisplayName(target)))
+}
+
+func parseAgentProfileSwitchArgs(args []string) (string, bool) {
+	if len(args) == 0 {
+		return "", false
+	}
+	first := strings.ToLower(strings.TrimSpace(args[0]))
+	switch first {
+	case "switch", "use", "set":
+		if len(args) < 2 {
+			return "", false
+		}
+		return strings.TrimSpace(args[1]), strings.TrimSpace(args[1]) != ""
+	case "clear":
+		return "", true
+	default:
+		return strings.TrimSpace(args[0]), strings.TrimSpace(args[0]) != ""
+	}
+}
+
+func (e *Engine) listAgentProfiles(switcher AgentProfileSwitcher) ([]AgentProfileInfo, error) {
+	fetchCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
+	defer cancel()
+	return switcher.ListAgentProfiles(fetchCtx)
+}
+
+func (e *Engine) agentProfilesText(switcher AgentProfileSwitcher) string {
+	current := switcher.GetAgentProfile()
+	var sb strings.Builder
+	sb.WriteString(e.i18n.Tf(MsgAgentProfileCurrent, e.agentProfileDisplayName(current)))
+
+	profiles, err := e.listAgentProfiles(switcher)
+	if err != nil {
+		sb.WriteString("\n\n")
+		sb.WriteString(e.i18n.Tf(MsgAgentProfileListFailed, err))
+		sb.WriteString("\n\n")
+		sb.WriteString(e.i18n.T(MsgAgentProfileUsage))
+		return sb.String()
+	}
+
+	sb.WriteString("\n\n")
+	if len(profiles) == 0 {
+		sb.WriteString(e.i18n.T(MsgAgentProfileListEmpty))
+	} else {
+		sb.WriteString(e.i18n.T(MsgAgentProfileListTitle))
+		for _, profile := range profiles {
+			marker := "  "
+			if current != "" && strings.EqualFold(profile.Name, current) {
+				marker = "> "
+			}
+			kind := ""
+			if profile.Kind != "" {
+				kind = " (" + profile.Kind + ")"
+			}
+			sb.WriteString(fmt.Sprintf("%s%s%s\n", marker, profile.Name, kind))
+		}
+	}
+	sb.WriteString("\n")
+	sb.WriteString(e.i18n.T(MsgAgentProfileUsage))
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (e *Engine) agentProfileDisplayName(profile string) string {
+	if strings.TrimSpace(profile) == "" {
+		return e.i18n.T(MsgAgentProfileDefault)
+	}
+	return profile
 }
 
 // resolveModelAlias resolves a user-supplied string to a model name.

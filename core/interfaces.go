@@ -328,6 +328,20 @@ type ModelSwitcher interface {
 	AvailableModels(ctx context.Context) []ModelOption
 }
 
+// AgentProfileInfo describes a selectable agent-side profile/persona.
+type AgentProfileInfo struct {
+	Name string
+	Kind string
+}
+
+// AgentProfileSwitcher is an optional interface for agents that support
+// switching agent-side profiles/personas for newly started sessions.
+type AgentProfileSwitcher interface {
+	SetAgentProfile(profile string)
+	GetAgentProfile() string
+	ListAgentProfiles(ctx context.Context) ([]AgentProfileInfo, error)
+}
+
 // ReasoningEffortSwitcher is an optional interface for agents that support
 // runtime switching of reasoning effort.
 type ReasoningEffortSwitcher interface {

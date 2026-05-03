@@ -248,18 +248,28 @@ const (
 	MsgCronBtnUnmute    MsgKey = "cron_btn_unmute"
 	MsgCronBtnDelete    MsgKey = "cron_btn_delete"
 
-	MsgStatusTitle          MsgKey = "status_title"
-	MsgReplyFooterRemaining MsgKey = "reply_footer_remaining"
-	MsgModelCurrent          MsgKey = "model_current"
-	MsgModelChanged          MsgKey = "model_changed"
-	MsgModelChangeFailed     MsgKey = "model_change_failed"
-	MsgModelCardSwitching    MsgKey = "model_card_switching"
-	MsgModelCardSwitched     MsgKey = "model_card_switched"
-	MsgModelCardSwitchFailed MsgKey = "model_card_switch_failed"
-	MsgModelNotSupported     MsgKey = "model_not_supported"
-	MsgReasoningCurrent      MsgKey = "reasoning_current"
-	MsgReasoningChanged      MsgKey = "reasoning_changed"
-	MsgReasoningNotSupported MsgKey = "reasoning_not_supported"
+	MsgStatusTitle              MsgKey = "status_title"
+	MsgReplyFooterRemaining     MsgKey = "reply_footer_remaining"
+	MsgModelCurrent             MsgKey = "model_current"
+	MsgModelChanged             MsgKey = "model_changed"
+	MsgModelChangeFailed        MsgKey = "model_change_failed"
+	MsgModelCardSwitching       MsgKey = "model_card_switching"
+	MsgModelCardSwitched        MsgKey = "model_card_switched"
+	MsgModelCardSwitchFailed    MsgKey = "model_card_switch_failed"
+	MsgModelNotSupported        MsgKey = "model_not_supported"
+	MsgAgentProfileCurrent      MsgKey = "agent_profile_current"
+	MsgAgentProfileDefault      MsgKey = "agent_profile_default"
+	MsgAgentProfileChanged      MsgKey = "agent_profile_changed"
+	MsgAgentProfileChangeFailed MsgKey = "agent_profile_change_failed"
+	MsgAgentProfileNotSupported MsgKey = "agent_profile_not_supported"
+	MsgAgentProfileNotFound     MsgKey = "agent_profile_not_found"
+	MsgAgentProfileListTitle    MsgKey = "agent_profile_list_title"
+	MsgAgentProfileListEmpty    MsgKey = "agent_profile_list_empty"
+	MsgAgentProfileListFailed   MsgKey = "agent_profile_list_failed"
+	MsgAgentProfileUsage        MsgKey = "agent_profile_usage"
+	MsgReasoningCurrent         MsgKey = "reasoning_current"
+	MsgReasoningChanged         MsgKey = "reasoning_changed"
+	MsgReasoningNotSupported    MsgKey = "reasoning_not_supported"
 
 	MsgCompressNotSupported MsgKey = "compress_not_supported"
 	MsgCompressing          MsgKey = "compressing"
@@ -441,10 +451,10 @@ const (
 	MsgCommandDisabled   MsgKey = "command_disabled"
 	MsgAdminRequired     MsgKey = "admin_required"
 	MsgRateLimited       MsgKey = "rate_limited"
-	MsgPsSent       MsgKey = "ps_sent"
-	MsgPsSendFailed MsgKey = "ps_send_failed"
-	MsgPsEmpty      MsgKey = "ps_empty"
-	MsgPsNoSession  MsgKey = "ps_no_session"
+	MsgPsSent            MsgKey = "ps_sent"
+	MsgPsSendFailed      MsgKey = "ps_send_failed"
+	MsgPsEmpty           MsgKey = "ps_empty"
+	MsgPsNoSession       MsgKey = "ps_no_session"
 
 	MsgWhoamiTitle     MsgKey = "whoami_title"
 	MsgWhoamiCardTitle MsgKey = "whoami_card_title"
@@ -886,6 +896,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  Manage API providers\n\n" +
 			"/memory [add|global|global add]\n  View/edit agent memory files\n\n" +
 			"/allow <tool>\n  Pre-allow a tool (next session)\n\n" +
+			"/agent [list|switch <name>|clear]\n  View/switch agent profile\n\n" +
 			"/model [switch <name>]\n  View/switch model\n\n" +
 			"/reasoning [level]\n  View/switch reasoning effort\n\n" +
 			"/mode [name]\n  View/switch permission mode\n\n" +
@@ -929,6 +940,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  管理 API Provider\n\n" +
 			"/memory [add|global|global add]\n  查看/编辑 Agent 记忆文件\n\n" +
 			"/allow <工具名>\n  预授权工具（下次会话生效）\n\n" +
+			"/agent [list|switch <名称>|clear]\n  查看/切换 Agent 人格\n\n" +
 			"/model [switch <名称>]\n  查看/切换模型\n\n" +
 			"/reasoning [级别]\n  查看/切换推理强度\n\n" +
 			"/mode [名称]\n  查看/切换权限模式\n\n" +
@@ -972,6 +984,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  管理 API Provider\n\n" +
 			"/memory [add|global|global add]\n  查看/編輯 Agent 記憶檔案\n\n" +
 			"/allow <工具名>\n  預授權工具（下次會話生效）\n\n" +
+			"/agent [list|switch <名稱>|clear]\n  查看/切換 Agent 人格\n\n" +
 			"/model [switch <名稱>]\n  查看/切換模型\n\n" +
 			"/reasoning [級別]\n  查看/切換推理強度\n\n" +
 			"/mode [名稱]\n  查看/切換權限模式\n\n" +
@@ -1013,6 +1026,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  API プロバイダ管理\n\n" +
 			"/memory [add|global|global add]\n  エージェントメモリの表示/編集\n\n" +
 			"/allow <ツール名>\n  ツールを事前許可（次のセッションで有効）\n\n" +
+			"/agent [list|switch <名前>|clear]\n  エージェントプロファイルの表示/切り替え\n\n" +
 			"/model [switch <名前>]\n  モデルの表示/切り替え\n\n" +
 			"/reasoning [レベル]\n  推論レベルの表示/切り替え\n\n" +
 			"/mode [名前]\n  権限モードの表示/切り替え\n\n" +
@@ -1054,6 +1068,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  Gestionar proveedores API\n\n" +
 			"/memory [add|global|global add]\n  Ver/editar archivos de memoria del agente\n\n" +
 			"/allow <herramienta>\n  Pre-autorizar herramienta (próxima sesión)\n\n" +
+			"/agent [list|switch <nombre>|clear]\n  Ver/cambiar perfil de agente\n\n" +
 			"/model [switch <nombre>]\n  Ver/cambiar modelo\n\n" +
 			"/reasoning [nivel]\n  Ver/cambiar nivel de razonamiento\n\n" +
 			"/mode [nombre]\n  Ver/cambiar modo de permisos\n\n" +
@@ -1142,6 +1157,7 @@ var messages = map[MsgKey]map[Language]string{
 	MsgHelpAgentSection: {
 		LangEnglish: "**Agent Configuration**\n" +
 			"/model [switch <name>] — View/switch model\n" +
+			"/agent [list|switch <name>|clear] — View/switch agent profile\n" +
 			"/mode [name] — View/switch permission mode\n" +
 			"/provider [list|add|...] — Manage API providers\n" +
 			"/memory [add|global|...] — View/edit memory files\n" +
@@ -1149,6 +1165,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/lang [en|zh|...] — View/switch language",
 		LangChinese: "**Agent 配置**\n" +
 			"/model [switch <名称>] — 查看/切换模型\n" +
+			"/agent [list|switch <名称>|clear] — 查看/切换 Agent 人格\n" +
 			"/mode [名称] — 查看/切换权限模式\n" +
 			"/provider [list|add|...] — 管理 API Provider\n" +
 			"/memory [add|global|...] — 查看/编辑记忆文件\n" +
@@ -1156,6 +1173,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/lang [en|zh|...] — 查看/切换语言",
 		LangTraditionalChinese: "**Agent 配置**\n" +
 			"/model [switch <名稱>] — 查看/切換模型\n" +
+			"/agent [list|switch <名稱>|clear] — 查看/切換 Agent 人格\n" +
 			"/mode [名稱] — 查看/切換權限模式\n" +
 			"/provider [list|add|...] — 管理 API Provider\n" +
 			"/memory [add|global|...] — 查看/編輯記憶檔案\n" +
@@ -1163,6 +1181,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/lang [en|zh|...] — 查看/切換語言",
 		LangJapanese: "**エージェント設定**\n" +
 			"/model [switch <名前>] — モデルの表示/切り替え\n" +
+			"/agent [list|switch <名前>|clear] — エージェントプロファイルの表示/切り替え\n" +
 			"/mode [名前] — 権限モードの表示/切り替え\n" +
 			"/provider [list|add|...] — API プロバイダ管理\n" +
 			"/memory [add|global|...] — メモリの表示/編集\n" +
@@ -1170,6 +1189,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/lang [en|zh|...] — 言語の表示/切り替え",
 		LangSpanish: "**Configuración del agente**\n" +
 			"/model [switch <nombre>] — Ver/cambiar modelo\n" +
+			"/agent [list|switch <nombre>|clear] — Ver/cambiar perfil de agente\n" +
 			"/mode [nombre] — Ver/cambiar modo de permisos\n" +
 			"/provider [list|add|...] — Gestionar proveedores\n" +
 			"/memory [add|global|...] — Ver/editar memoria\n" +
@@ -1950,6 +1970,76 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前 Agent 不支援模型切換。",
 		LangJapanese:           "このエージェントはモデルの切り替えをサポートしていません。",
 		LangSpanish:            "Este agente no soporta el cambio de modelo.",
+	},
+	MsgAgentProfileCurrent: {
+		LangEnglish:            "Current agent profile: %s",
+		LangChinese:            "当前 Agent 人格: %s",
+		LangTraditionalChinese: "目前 Agent 人格: %s",
+		LangJapanese:           "現在のエージェントプロファイル: %s",
+		LangSpanish:            "Perfil de agente actual: %s",
+	},
+	MsgAgentProfileDefault: {
+		LangEnglish:            "default",
+		LangChinese:            "默认",
+		LangTraditionalChinese: "預設",
+		LangJapanese:           "デフォルト",
+		LangSpanish:            "predeterminado",
+	},
+	MsgAgentProfileChanged: {
+		LangEnglish:            "Agent profile switched to `%s`. New sessions will use this profile.",
+		LangChinese:            "Agent 人格已切换为 `%s`，新会话将使用此人格。",
+		LangTraditionalChinese: "Agent 人格已切換為 `%s`，新會話將使用此人格。",
+		LangJapanese:           "エージェントプロファイルを `%s` に切り替えました。新しいセッションで使用されます。",
+		LangSpanish:            "Perfil de agente cambiado a `%s`. Las nuevas sesiones usarán este perfil.",
+	},
+	MsgAgentProfileChangeFailed: {
+		LangEnglish:            "❌ Failed to change agent profile: %v",
+		LangChinese:            "❌ 切换 Agent 人格失败: %v",
+		LangTraditionalChinese: "❌ 切換 Agent 人格失敗: %v",
+		LangJapanese:           "❌ エージェントプロファイルの切り替えに失敗しました: %v",
+		LangSpanish:            "❌ Error al cambiar el perfil de agente: %v",
+	},
+	MsgAgentProfileNotSupported: {
+		LangEnglish:            "This agent does not support agent profile switching.",
+		LangChinese:            "当前 Agent 不支持人格切换。",
+		LangTraditionalChinese: "目前 Agent 不支援人格切換。",
+		LangJapanese:           "このエージェントはプロファイル切り替えをサポートしていません。",
+		LangSpanish:            "Este agente no soporta el cambio de perfil.",
+	},
+	MsgAgentProfileNotFound: {
+		LangEnglish:            "Agent profile `%s` not found. Use `/agent list` to view available profiles.",
+		LangChinese:            "未找到 Agent 人格 `%s`。使用 `/agent list` 查看可用人格。",
+		LangTraditionalChinese: "未找到 Agent 人格 `%s`。使用 `/agent list` 查看可用人格。",
+		LangJapanese:           "エージェントプロファイル `%s` が見つかりません。`/agent list` で確認してください。",
+		LangSpanish:            "Perfil de agente `%s` no encontrado. Usa `/agent list` para ver los perfiles disponibles.",
+	},
+	MsgAgentProfileListTitle: {
+		LangEnglish:            "Available agent profiles:\n",
+		LangChinese:            "可用 Agent 人格:\n",
+		LangTraditionalChinese: "可用 Agent 人格:\n",
+		LangJapanese:           "利用可能なエージェントプロファイル:\n",
+		LangSpanish:            "Perfiles de agente disponibles:\n",
+	},
+	MsgAgentProfileListEmpty: {
+		LangEnglish:            "No agent profiles found.",
+		LangChinese:            "未找到可用 Agent 人格。",
+		LangTraditionalChinese: "未找到可用 Agent 人格。",
+		LangJapanese:           "利用可能なエージェントプロファイルが見つかりません。",
+		LangSpanish:            "No se encontraron perfiles de agente.",
+	},
+	MsgAgentProfileListFailed: {
+		LangEnglish:            "Failed to list agent profiles: %v",
+		LangChinese:            "列出 Agent 人格失败: %v",
+		LangTraditionalChinese: "列出 Agent 人格失敗: %v",
+		LangJapanese:           "エージェントプロファイル一覧の取得に失敗しました: %v",
+		LangSpanish:            "Error al listar perfiles de agente: %v",
+	},
+	MsgAgentProfileUsage: {
+		LangEnglish:            "Usage: `/agent list`, `/agent <name>`, `/agent switch <name>`, `/agent clear`",
+		LangChinese:            "用法：`/agent list`、`/agent <名称>`、`/agent switch <名称>`、`/agent clear`",
+		LangTraditionalChinese: "用法：`/agent list`、`/agent <名稱>`、`/agent switch <名稱>`、`/agent clear`",
+		LangJapanese:           "使い方: `/agent list`, `/agent <name>`, `/agent switch <name>`, `/agent clear`",
+		LangSpanish:            "Uso: `/agent list`, `/agent <nombre>`, `/agent switch <nombre>`, `/agent clear`",
 	},
 	MsgReasoningCurrent: {
 		LangEnglish:            "Current reasoning effort: %s",

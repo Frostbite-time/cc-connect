@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-"path/filepath"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +27,7 @@ type opencodeSession struct {
 	cmd      string
 	workDir  string
 	model    string
+	agent    string
 	mode     string
 	extraEnv []string
 	events   chan core.Event
@@ -37,13 +38,14 @@ type opencodeSession struct {
 	alive    atomic.Bool
 }
 
-func newOpencodeSession(ctx context.Context, cmd, workDir, model, mode, resumeID string, extraEnv []string) (*opencodeSession, error) {
+func newOpencodeSession(ctx context.Context, cmd, workDir, model, agent, mode, resumeID string, extraEnv []string) (*opencodeSession, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	s := &opencodeSession{
 		cmd:      cmd,
 		workDir:  workDir,
 		model:    model,
+		agent:    agent,
 		mode:     mode,
 		extraEnv: extraEnv,
 		events:   make(chan core.Event, 64),
@@ -154,6 +156,9 @@ func (s *opencodeSession) buildRunArgs(prompt string, imagePaths []string, chatI
 	}
 	if s.model != "" {
 		args = append(args, "--model", s.model)
+	}
+	if s.agent != "" {
+		args = append(args, "--agent", s.agent)
 	}
 	if s.workDir != "" {
 		args = append(args, "--dir", s.workDir)

@@ -513,6 +513,25 @@ func TestSaveAgentModel(t *testing.T) {
 	}
 }
 
+func TestSaveAgentProfile(t *testing.T) {
+	writeTestConfig(t, providerConfigTOML)
+
+	if err := SaveAgentProfile("demo", "cersei"); err != nil {
+		t.Fatalf("SaveAgentProfile() error: %v", err)
+	}
+
+	cfg := readTestConfig(t)
+	if got, _ := cfg.Projects[0].Agent.Options["agent"].(string); got != "cersei" {
+		t.Fatalf("agent.options.agent = %q, want cersei", got)
+	}
+	if got, _ := cfg.Projects[0].Agent.Options["mode"].(string); got != "default" {
+		t.Fatalf("agent.options.mode = %q, want default", got)
+	}
+	if got, _ := cfg.Projects[0].Agent.Options["provider"].(string); got != "primary" {
+		t.Fatalf("agent.options.provider = %q, want primary", got)
+	}
+}
+
 const providerConfigWithCommentsTOML = `# This is my config file
 # Very important - do not lose this!
 custom_top = "keep_me"
@@ -613,6 +632,33 @@ func TestSaveAgentModel_PreservesCommentsAndUnknownFields(t *testing.T) {
 	}
 	if !strings.Contains(text, `model = "gpt-5.4"`) {
 		t.Fatalf("expected model to be set, got:\n%s", text)
+	}
+}
+
+func TestSaveAgentProfile_PreservesCommentsAndUnknownFields(t *testing.T) {
+	writeTestConfig(t, providerConfigWithCommentsTOML)
+
+	if err := SaveAgentProfile("demo", "cersei"); err != nil {
+		t.Fatalf("SaveAgentProfile() error: %v", err)
+	}
+
+	content, err := os.ReadFile(ConfigPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	text := string(content)
+
+	if !strings.Contains(text, "# This is my config file") {
+		t.Fatalf("expected top comment to be preserved, got:\n%s", text)
+	}
+	if !strings.Contains(text, `custom_option = "still_here"`) {
+		t.Fatalf("expected unknown options field to be preserved, got:\n%s", text)
+	}
+	if !strings.Contains(text, `provider = "primary"`) {
+		t.Fatalf("expected provider to be preserved, got:\n%s", text)
+	}
+	if !strings.Contains(text, `agent = "cersei"`) {
+		t.Fatalf("expected agent profile to be set, got:\n%s", text)
 	}
 }
 

@@ -388,6 +388,28 @@ type stubStrictModelAgent struct {
 	calls  int
 }
 
+type stubAgentProfileAgent struct {
+	stubAgent
+	profile  string
+	profiles []AgentProfileInfo
+	listErr  error
+}
+
+func (a *stubAgentProfileAgent) SetAgentProfile(profile string) {
+	a.profile = profile
+}
+
+func (a *stubAgentProfileAgent) GetAgentProfile() string {
+	return a.profile
+}
+
+func (a *stubAgentProfileAgent) ListAgentProfiles(_ context.Context) ([]AgentProfileInfo, error) {
+	if a.listErr != nil {
+		return nil, a.listErr
+	}
+	return append([]AgentProfileInfo(nil), a.profiles...), nil
+}
+
 type stubLiveModeSession struct {
 	stubAgentSession
 	modes []string
@@ -3204,6 +3226,97 @@ func TestCmdProvider_UsesLegacyTextOnPlatformWithoutCardSupport(t *testing.T) {
 	}
 	if !strings.Contains(p.sent[0], "switch") {
 		t.Fatalf("provider text = %q, want switch hint", p.sent[0])
+	}
+}
+
+func TestCmdAgent_SwitchesProfileAndClearsSession(t *testing.T) {
+	p := &stubPlatformEngine{n: "plain"}
+	agent := &stubAgentProfileAgent{
+		profile: "qqbot",
+		profiles: []AgentProfileInfo{
+			{Name: "qqbot", Kind: "primary"},
+			{Name: "cersei", Kind: "primary"},
+		},
+	}
+	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	var savedProfile string
+	e.SetAgentProfileSaveFunc(func(profile string) error {
+		savedProfile = profile
+		return nil
+	})
+	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	s := e.sessions.GetOrCreateActive(msg.SessionKey)
+	s.SetAgentSessionID("existing-session", "test")
+	s.AddHistory("user", "keep me")
+
+	e.cmdAgent(p, msg, []string{"switch", "cersei"})
+
+	if agent.profile != "cersei" {
+		t.Fatalf("agent profile = %q, want cersei", agent.profile)
+	}
+	if savedProfile != "cersei" {
+		t.Fatalf("saved profile = %q, want cersei", savedProfile)
+	}
+	active := e.sessions.GetOrCreateActive(msg.SessionKey)
+	if active.AgentSessionID != "" {
+		t.Fatalf("session id = %q, want cleared after agent switch", active.AgentSessionID)
+	}
+	if len(active.History) != 0 {
+		t.Fatalf("history length = %d, want cleared", len(active.History))
+	}
+	if sent := p.getSent(); len(sent) != 1 || !strings.Contains(sent[0], "cersei") {
+		t.Fatalf("reply = %#v, want switched profile", sent)
+	}
+}
+
+func TestCmdAgent_DoesNotSwitchWhenSaveFails(t *testing.T) {
+	p := &stubPlatformEngine{n: "plain"}
+	agent := &stubAgentProfileAgent{
+		profile:  "qqbot",
+		profiles: []AgentProfileInfo{{Name: "qqbot", Kind: "primary"}, {Name: "cersei", Kind: "primary"}},
+	}
+	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	e.SetAgentProfileSaveFunc(func(profile string) error {
+		return errors.New("disk full")
+	})
+	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	s := e.sessions.GetOrCreateActive(msg.SessionKey)
+	s.SetAgentSessionID("existing-session", "test")
+	s.AddHistory("user", "keep me")
+
+	e.cmdAgent(p, msg, []string{"cersei"})
+
+	if agent.profile != "qqbot" {
+		t.Fatalf("agent profile = %q, want unchanged qqbot", agent.profile)
+	}
+	active := e.sessions.GetOrCreateActive(msg.SessionKey)
+	if active.AgentSessionID != "existing-session" {
+		t.Fatalf("session id = %q, want existing-session after failure", active.AgentSessionID)
+	}
+	if len(active.History) != 1 {
+		t.Fatalf("history length = %d, want unchanged", len(active.History))
+	}
+	if sent := p.getSent(); len(sent) != 1 || !strings.Contains(sent[0], "Failed to change agent profile") {
+		t.Fatalf("reply = %#v, want failure", sent)
+	}
+}
+
+func TestCmdAgent_ListShowsProfiles(t *testing.T) {
+	p := &stubPlatformEngine{n: "plain"}
+	agent := &stubAgentProfileAgent{
+		profile:  "qqbot",
+		profiles: []AgentProfileInfo{{Name: "qqbot", Kind: "primary"}, {Name: "cersei", Kind: "primary"}},
+	}
+	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+
+	e.cmdAgent(p, &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}, []string{"list"})
+
+	sent := p.getSent()
+	if len(sent) != 1 {
+		t.Fatalf("sent messages = %d, want 1", len(sent))
+	}
+	if !strings.Contains(sent[0], "Current agent profile: qqbot") || !strings.Contains(sent[0], "cersei") {
+		t.Fatalf("agent list text = %q, want current and available profiles", sent[0])
 	}
 }
 
@@ -11113,8 +11226,8 @@ func TestSessionName_ClaudeCodeLikeFlow(t *testing.T) {
 }
 
 // acpLikeSession simulates ACP behavior:
-// - CurrentSessionID() returns the thread ID immediately after creation
-//   (ACP does handshake before returning from StartSession)
+//   - CurrentSessionID() returns the thread ID immediately after creation
+//     (ACP does handshake before returning from StartSession)
 type acpLikeSession struct {
 	threadID string
 	events   chan Event

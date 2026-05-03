@@ -31,6 +31,7 @@ func init() {
 type Agent struct {
 	workDir              string
 	model                string
+	agentProfile         string
 	mode                 string
 	cmd                  string // CLI binary name, default "opencode"
 	providers            []core.ProviderConfig
@@ -63,6 +64,8 @@ func New(opts map[string]any) (core.Agent, error) {
 		workDir = "."
 	}
 	model, _ := opts["model"].(string)
+	agentProfile, _ := opts["agent"].(string)
+	agentProfile = resolveInitialAgentProfile(workDir, agentProfile)
 	mode, _ := opts["mode"].(string)
 	mode = normalizeMode(mode)
 	cmd, _ := opts["cmd"].(string)
@@ -84,12 +87,30 @@ func New(opts map[string]any) (core.Agent, error) {
 	return &Agent{
 		workDir:              workDir,
 		model:                model,
+		agentProfile:         agentProfile,
 		mode:                 mode,
 		cmd:                  cmd,
 		activeIdx:            -1,
 		modelCachePath:       modelCachePath,
 		persistentModelCache: persistentModelCache,
 	}, nil
+}
+
+func resolveInitialAgentProfile(workDir, explicit string) string {
+	if profile := strings.TrimSpace(explicit); profile != "" {
+		return profile
+	}
+	data, err := os.ReadFile(filepath.Join(workDir, "opencode.json"))
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		DefaultAgent string `json:"default_agent"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.DefaultAgent)
 }
 
 func opencodeProjectModelCachePath(dataDir, project string) string {
@@ -215,6 +236,57 @@ func (a *Agent) GetModel() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return core.GetProviderModel(a.providers, a.activeIdx, a.model)
+}
+
+func (a *Agent) SetAgentProfile(profile string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.agentProfile = strings.TrimSpace(profile)
+	slog.Info("opencode: agent profile changed", "agent", a.agentProfile)
+}
+
+func (a *Agent) GetAgentProfile() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.agentProfile
+}
+
+func (a *Agent) ListAgentProfiles(ctx context.Context) ([]core.AgentProfileInfo, error) {
+	a.mu.RLock()
+	cmd := a.cmd
+	workDir := a.workDir
+	a.mu.RUnlock()
+
+	c := exec.CommandContext(ctx, cmd, "agent", "list")
+	c.Dir = workDir
+	out, err := c.Output()
+	if err != nil {
+		return nil, fmt.Errorf("opencode: agent list: %w", err)
+	}
+	return parseOpencodeAgentList(out), nil
+}
+
+func parseOpencodeAgentList(out []byte) []core.AgentProfileInfo {
+	seen := map[string]bool{}
+	var profiles []core.AgentProfileInfo
+	for _, raw := range strings.Split(string(out), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "[") || strings.HasPrefix(line, "{") || strings.HasPrefix(line, "]") || strings.HasPrefix(line, "}") || strings.HasPrefix(line, "\"") {
+			continue
+		}
+		idx := strings.LastIndex(line, " (")
+		if idx <= 0 || !strings.HasSuffix(line, ")") {
+			continue
+		}
+		name := strings.TrimSpace(line[:idx])
+		kind := strings.TrimSpace(strings.TrimSuffix(line[idx+2:], ")"))
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		profiles = append(profiles, core.AgentProfileInfo{Name: name, Kind: kind})
+	}
+	return profiles
 }
 
 func (a *Agent) configuredModels() []core.ModelOption {
@@ -456,6 +528,7 @@ func (a *Agent) SetSessionEnv(env []string) {
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
 	a.mu.Lock()
 	model := a.model
+	agentProfile := a.agentProfile
 	mode := a.mode
 	cmd := a.cmd
 	workDir := a.workDir
@@ -468,7 +541,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 	a.mu.Unlock()
 
-	return newOpencodeSession(ctx, cmd, workDir, model, mode, sessionID, extraEnv)
+	return newOpencodeSession(ctx, cmd, workDir, model, agentProfile, mode, sessionID, extraEnv)
 }
 
 // ListSessions runs `opencode session list` and parses the JSON output.
