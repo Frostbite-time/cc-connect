@@ -135,6 +135,47 @@ func TestOpencodeSessionBuildRunArgsIncludesAgent(t *testing.T) {
 	}
 }
 
+func TestOpencodeSessionHandleTextSuppressesCompactionContinuation(t *testing.T) {
+	s := &opencodeSession{ctx: context.Background(), events: make(chan core.Event, 1)}
+
+	s.handleText(map[string]any{
+		"type": "text",
+		"part": map[string]any{
+			"type":      "text",
+			"text":      "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.",
+			"synthetic": true,
+			"metadata": map[string]any{"compaction_continue": true},
+		},
+	})
+
+	select {
+	case evt := <-s.events:
+		t.Fatalf("unexpected event for compaction continuation: %+v", evt)
+	default:
+	}
+}
+
+func TestOpencodeSessionHandleTextEmitsNormalText(t *testing.T) {
+	s := &opencodeSession{ctx: context.Background(), events: make(chan core.Event, 1)}
+
+	s.handleText(map[string]any{
+		"type": "text",
+		"part": map[string]any{
+			"type": "text",
+			"text": "normal answer",
+		},
+	})
+
+	select {
+	case evt := <-s.events:
+		if evt.Type != core.EventText || evt.Content != "normal answer" {
+			t.Fatalf("event = %+v, want normal text", evt)
+		}
+	default:
+		t.Fatal("expected normal text event")
+	}
+}
+
 func TestParseOpencodeAgentList(t *testing.T) {
 	out := []byte(`build (primary)
   [

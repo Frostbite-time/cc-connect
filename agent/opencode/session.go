@@ -268,6 +268,9 @@ func (s *opencodeSession) handleText(raw map[string]any) {
 	if part == nil {
 		return
 	}
+	if isCompactionContinuation(raw, part) {
+		return
+	}
 	text, _ := part["text"].(string)
 	if text != "" {
 		evt := core.Event{Type: core.EventText, Content: text}
@@ -277,6 +280,32 @@ func (s *opencodeSession) handleText(raw map[string]any) {
 			return
 		}
 	}
+}
+
+func isCompactionContinuation(raw, part map[string]any) bool {
+	if metadataHasCompactionContinue(part["metadata"]) || metadataHasCompactionContinue(raw["metadata"]) {
+		return true
+	}
+	// OpenCode records its auto-compaction continuation as a synthetic text
+	// part. Suppress only this known internal prompt to avoid hiding normal text.
+	if boolValue(part["synthetic"]) || boolValue(raw["synthetic"]) {
+		text, _ := part["text"].(string)
+		return strings.HasPrefix(strings.TrimSpace(text), "Continue if you have next steps")
+	}
+	return false
+}
+
+func metadataHasCompactionContinue(v any) bool {
+	metadata, _ := v.(map[string]any)
+	if metadata == nil {
+		return false
+	}
+	return boolValue(metadata["compaction_continue"])
+}
+
+func boolValue(v any) bool {
+	b, _ := v.(bool)
+	return b
 }
 
 func (s *opencodeSession) handleToolUse(raw map[string]any) {
