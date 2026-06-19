@@ -88,6 +88,7 @@ func TestNew_QQGroupOptions(t *testing.T) {
 		"group_reply_all":         false,
 		"group_context_messages":  int64(3),
 		"group_context_max_chars": int64(1200),
+		"quote_context":           true,
 	})
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -101,6 +102,9 @@ func TestNew_QQGroupOptions(t *testing.T) {
 	}
 	if platform.groupContextMaxChars != 1200 {
 		t.Errorf("groupContextMaxChars = %d, want 1200", platform.groupContextMaxChars)
+	}
+	if !platform.quoteContext {
+		t.Error("quoteContext = false, want true")
 	}
 }
 
@@ -337,6 +341,96 @@ func TestHandleMessage_QQRecentGroupContextDedupesPerSession(t *testing.T) {
 	}
 }
 
+func TestHandleMessage_QQQuoteContextDisabledByDefault(t *testing.T) {
+	handled := make(chan *core.Message, 1)
+	p := newQQTestPlatform(func(_ core.Platform, msg *core.Message) {
+		handled <- msg
+	})
+
+	p.handleMessage(qqPayload(1, 100, 7, "alice", []any{
+		qqReply("99"),
+		qqText("现在这条"),
+	}))
+
+	msg := receiveQQMessage(t, handled)
+	if msg.Content != "现在这条" {
+		t.Fatalf("Content = %q, want 现在这条", msg.Content)
+	}
+	if msg.ExtraContent != "" {
+		t.Fatalf("ExtraContent = %q, want empty when quote_context is disabled", msg.ExtraContent)
+	}
+}
+
+func TestHandleMessage_QQQuoteContextFromGetMsg(t *testing.T) {
+	handled := make(chan *core.Message, 1)
+	p := newQQTestPlatform(func(_ core.Platform, msg *core.Message) {
+		handled <- msg
+	})
+	p.quoteContext = true
+	p.callAPIHook = func(action string, params map[string]any) (map[string]any, error) {
+		if action != "get_msg" {
+			t.Fatalf("action = %q, want get_msg", action)
+		}
+		if got := params["message_id"]; got != "99" {
+			t.Fatalf("message_id = %v, want 99", got)
+		}
+		return map[string]any{
+			"sender": map[string]any{
+				"card":    "bob-card",
+				"user_id": float64(8),
+			},
+			"message": []any{
+				qqText("被引用的消息"),
+			},
+		}, nil
+	}
+
+	p.handleMessage(qqPayload(1, 100, 7, "alice", []any{
+		qqReply("99"),
+		qqText("现在这条"),
+	}))
+
+	msg := receiveQQMessage(t, handled)
+	if msg.Content != "现在这条" {
+		t.Fatalf("Content = %q, want 现在这条", msg.Content)
+	}
+	want := "[引用消息]\n发送者: bob-card (8)\n内容: 被引用的消息"
+	if msg.ExtraContent != want {
+		t.Fatalf("ExtraContent = %q, want %q", msg.ExtraContent, want)
+	}
+}
+
+func TestHandleMessage_QQQuoteContextFallbackOnGetMsgError(t *testing.T) {
+	handled := make(chan *core.Message, 1)
+	p := newQQTestPlatform(func(_ core.Platform, msg *core.Message) {
+		handled <- msg
+	})
+	p.quoteContext = true
+	p.callAPIHook = func(action string, params map[string]any) (map[string]any, error) {
+		return nil, assertAnError{}
+	}
+
+	p.handleMessage(qqPayload(1, 100, 7, "alice", []any{
+		qqReply("99"),
+		qqText("现在这条"),
+	}))
+
+	msg := receiveQQMessage(t, handled)
+	if !strings.Contains(msg.ExtraContent, "[引用消息解析失败]") {
+		t.Fatalf("ExtraContent missing failure marker: %q", msg.ExtraContent)
+	}
+	if !strings.Contains(msg.ExtraContent, "引用消息ID: 99") {
+		t.Fatalf("ExtraContent missing reply id: %q", msg.ExtraContent)
+	}
+}
+
+func TestExtractCQReplyID(t *testing.T) {
+	raw := "[CQ:reply,id=12345][CQ:at,qq=42] hello"
+	if got := extractCQReplyID(raw); got != "12345" {
+		t.Fatalf("extractCQReplyID() = %q, want 12345", got)
+	}
+}
+
 func newQQTestPlatform(handler core.MessageHandler) *Platform {
 	p := &Platform{
 		selfID:        42,
@@ -380,6 +474,14 @@ func qqText(text string) map[string]any {
 func qqAt(qq int64) map[string]any {
 	return map[string]any{"type": "at", "data": map[string]any{"qq": strconv.FormatInt(qq, 10)}}
 }
+
+func qqReply(id string) map[string]any {
+	return map[string]any{"type": "reply", "data": map[string]any{"id": id}}
+}
+
+type assertAnError struct{}
+
+func (assertAnError) Error() string { return "boom" }
 
 // verify Platform implements core.Platform
 var _ core.Platform = (*Platform)(nil)

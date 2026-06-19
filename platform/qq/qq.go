@@ -33,6 +33,7 @@ type Platform struct {
 	shareSessionInChannel bool
 	groupContextMessages  int
 	groupContextMaxChars  int
+	quoteContext          bool
 	handler               core.MessageHandler
 	conn                  *websocket.Conn
 	mu                    sync.Mutex
@@ -46,6 +47,7 @@ type Platform struct {
 	groupContextSeq       uint64
 	groupContext          map[int64][]groupContextItem
 	groupContextLastSeq   map[string]uint64
+	callAPIHook           func(action string, params map[string]any) (map[string]any, error)
 }
 
 const (
@@ -80,6 +82,7 @@ func New(opts map[string]any) (core.Platform, error) {
 	if groupContextMaxChars < 0 {
 		groupContextMaxChars = 0
 	}
+	quoteContext, _ := opts["quote_context"].(bool)
 
 	core.CheckAllowFrom("qq", allowFrom)
 	return &Platform{
@@ -90,6 +93,7 @@ func New(opts map[string]any) (core.Platform, error) {
 		shareSessionInChannel: shareSessionInChannel,
 		groupContextMessages:  groupContextMessages,
 		groupContextMaxChars:  groupContextMaxChars,
+		quoteContext:          quoteContext,
 	}, nil
 }
 
@@ -235,7 +239,8 @@ func (p *Platform) handleMessage(payload map[string]any) {
 	}
 
 	// Parse message content from CQ message array or raw_message
-	text, images, audio := p.parseMessage(payload)
+	parsed := p.parseMessage(payload)
+	text, images, audio := parsed.text, parsed.images, parsed.audio
 	if text == "" && len(images) == 0 && audio == nil {
 		return
 	}
@@ -276,6 +281,9 @@ func (p *Platform) handleMessage(payload map[string]any) {
 	if msgType == "group" && !p.groupReplyAll && directedAtBot {
 		extraContent = p.buildRecentGroupContext(groupID, sessionKey)
 	}
+	if p.quoteContext && parsed.replyID != "" {
+		extraContent = appendExtraContent(extraContent, p.buildQuoteContext(parsed.replyID))
+	}
 
 	msg := &core.Message{
 		SessionKey:   sessionKey,
@@ -295,10 +303,18 @@ func (p *Platform) handleMessage(payload map[string]any) {
 	p.handler(p, msg)
 }
 
-func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAttachment, *core.AudioAttachment) {
+type parsedMessage struct {
+	text    string
+	images  []core.ImageAttachment
+	audio   *core.AudioAttachment
+	replyID string
+}
+
+func (p *Platform) parseMessage(payload map[string]any) parsedMessage {
 	var textParts []string
 	var images []core.ImageAttachment
 	var audio *core.AudioAttachment
+	var replyID string
 
 	// OneBot message can be array of segments or a string
 	switch msg := payload["message"].(type) {
@@ -315,6 +331,10 @@ func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAtt
 			}
 
 			switch segType {
+			case "reply":
+				if id := valueString(data["id"]); id != "" {
+					replyID = id
+				}
 			case "text":
 				if text, ok := data["text"].(string); ok {
 					textParts = append(textParts, text)
@@ -358,11 +378,17 @@ func (p *Platform) parseMessage(payload map[string]any) (string, []core.ImageAtt
 	default:
 		// raw_message fallback (string with CQ codes)
 		if raw, ok := payload["raw_message"].(string); ok {
+			replyID = extractCQReplyID(raw)
 			textParts = append(textParts, stripCQCodes(raw))
 		}
 	}
 
-	return strings.TrimSpace(strings.Join(textParts, "")), images, audio
+	return parsedMessage{
+		text:    strings.TrimSpace(strings.Join(textParts, "")),
+		images:  images,
+		audio:   audio,
+		replyID: replyID,
+	}
 }
 
 func (p *Platform) isDirectedAtBot(payload map[string]any) bool {
@@ -557,6 +583,9 @@ func (p *Platform) resolveGroupName(groupID int64) string {
 // ── OneBot API call via WebSocket ───────────────────────────────
 
 func (p *Platform) callAPI(action string, params map[string]any) (map[string]any, error) {
+	if p.callAPIHook != nil {
+		return p.callAPIHook(action, params)
+	}
 	seq := p.echoSeq.Add(1)
 	echo := strconv.FormatInt(seq, 10)
 
@@ -771,6 +800,110 @@ func formatGroupContextLine(item groupContextItem) string {
 	return fmt.Sprintf("- %s (%d): %s", name, item.userID, text)
 }
 
+func (p *Platform) buildQuoteContext(replyID string) string {
+	replyID = strings.TrimSpace(replyID)
+	if replyID == "" {
+		return ""
+	}
+	result, err := p.callAPI("get_msg", map[string]any{"message_id": replyID})
+	if err != nil {
+		return fmt.Sprintf("[引用消息解析失败]\n引用消息ID: %s\n原因: 无法获取被引用消息", replyID)
+	}
+	summary := summarizeQuotedMessage(result)
+	if summary == "" {
+		return fmt.Sprintf("[引用消息解析失败]\n引用消息ID: %s\n原因: 被引用消息内容为空或暂不支持解析", replyID)
+	}
+	return "[引用消息]\n" + summary
+}
+
+func summarizeQuotedMessage(msg map[string]any) string {
+	text := summarizeMessageContent(msg)
+	var senderName, senderID string
+	if sender, ok := msg["sender"].(map[string]any); ok {
+		card, _ := sender["card"].(string)
+		nick, _ := sender["nickname"].(string)
+		if card != "" {
+			senderName = card
+		} else {
+			senderName = nick
+		}
+		senderID = valueString(sender["user_id"])
+	}
+	var lines []string
+	if senderName != "" && senderID != "" {
+		lines = append(lines, fmt.Sprintf("发送者: %s (%s)", senderName, senderID))
+	} else if senderName != "" {
+		lines = append(lines, "发送者: "+senderName)
+	} else if senderID != "" {
+		lines = append(lines, "发送者: "+senderID)
+	}
+	if text != "" {
+		lines = append(lines, "内容: "+text)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func summarizeMessageContent(payload map[string]any) string {
+	switch msg := payload["message"].(type) {
+	case []any:
+		return summarizeSegments(msg)
+	case string:
+		return strings.TrimSpace(stripCQCodes(msg))
+	default:
+		if raw, ok := payload["raw_message"].(string); ok {
+			return strings.TrimSpace(stripCQCodes(raw))
+		}
+	}
+	return ""
+}
+
+func summarizeSegments(segments []any) string {
+	var parts []string
+	for _, seg := range segments {
+		s, ok := seg.(map[string]any)
+		if !ok {
+			continue
+		}
+		segType, _ := s["type"].(string)
+		data, _ := s["data"].(map[string]any)
+		switch segType {
+		case "text":
+			if text, ok := data["text"].(string); ok {
+				parts = append(parts, text)
+			}
+		case "image":
+			parts = append(parts, "[图片]")
+		case "record":
+			parts = append(parts, "[语音]")
+		case "video":
+			parts = append(parts, "[视频]")
+		case "file":
+			if name, ok := data["name"].(string); ok && strings.TrimSpace(name) != "" {
+				parts = append(parts, "[文件: "+strings.TrimSpace(name)+"]")
+			} else {
+				parts = append(parts, "[文件]")
+			}
+		case "at":
+			if qq := valueString(data["qq"]); qq != "" {
+				parts = append(parts, "[CQ:at,qq="+qq+"]")
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, ""))
+}
+
+func appendExtraContent(existing, next string) string {
+	existing = strings.TrimSpace(existing)
+	next = strings.TrimSpace(next)
+	if existing == "" {
+		return next
+	}
+	if next == "" {
+		return existing
+	}
+	return existing + "\n\n" + next
+}
+
 func truncateRunes(s string, max int) string {
 	if max <= 0 {
 		return ""
@@ -812,6 +945,27 @@ func stripCQCodes(s string) string {
 		s = s[idx+end+1:]
 	}
 	return result.String()
+}
+
+func extractCQReplyID(raw string) string {
+	for {
+		idx := strings.Index(raw, "[CQ:reply,")
+		if idx < 0 {
+			return ""
+		}
+		end := strings.Index(raw[idx:], "]")
+		if end < 0 {
+			return ""
+		}
+		code := raw[idx+len("[CQ:reply,") : idx+end]
+		for _, part := range strings.Split(code, ",") {
+			key, value, ok := strings.Cut(part, "=")
+			if ok && strings.TrimSpace(key) == "id" {
+				return strings.TrimSpace(value)
+			}
+		}
+		raw = raw[idx+end+1:]
+	}
 }
 
 func downloadFile(url string) ([]byte, string, error) {

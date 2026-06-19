@@ -67,6 +67,7 @@ allow_from = "*"                 # 允许交互的 QQ 号，"*" 表示所有人
 group_reply_all = false           # false: 群聊必须 @机器人 才响应；true: 群聊所有消息都响应
 group_context_messages = 10       # @触发时附带最近 N 条未发送过的群消息；0 表示禁用
 group_context_max_chars = 2000    # 最近群消息上下文最大字符数；0 表示不限制
+quote_context = false             # true: 用户引用 QQ 消息时，通过 get_msg 获取被引用消息并附加给 Agent
 ```
 
 **`allow_from` 配置说明 / `allow_from` options:**
@@ -99,6 +100,10 @@ Group chat is supported. By default, QQ keeps the previous behavior and responds
 如果启用 `group_context_messages`，QQ 适配器会缓存未触发机器人的普通群消息，并在下一次 @触发时作为 `ExtraContent` 附加给 Agent。每个 session 会记录已注入到 Agent 的最高上下文序号，后续 @不会重复注入同一批群消息，从而节省 token。
 
 When `group_context_messages` is enabled, the QQ adapter caches non-triggering group messages and injects recent messages as `ExtraContent` on the next @mention. Each session tracks the highest injected context sequence, so the same group messages are not repeatedly sent to the agent.
+
+如果启用 `quote_context`，QQ 适配器会识别 OneBot `reply` 消息段，并通过 `get_msg` 查询被引用消息。查询成功时，被引用消息会以 `[引用消息]` 块附加在 Agent 收到的当前提问文本前；没有引用消息时不会添加引用块。查询失败或内容无法解析时，会附加 `[引用消息解析失败]`，并包含引用消息 ID，便于 Agent 明确知道本次引用上下文不可用。
+
+When `quote_context` is enabled, the QQ adapter recognizes OneBot `reply` segments and fetches the referenced message with `get_msg`. On success, it prepends a `[引用消息]` block near the current user text. Messages without a quote do not get a quote block. Fetch or parse failures produce a `[引用消息解析失败]` fallback with the referenced message ID.
 
 ## 支持的消息类型 / Supported Message Types
 
