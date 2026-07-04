@@ -12056,6 +12056,12 @@ func (e *Engine) buildSenderPrompt(content, userID, userName, platform, sessionK
 
 func extractChannelID(sessionKey string) string {
 	// Format: "platform:channelID:userID" or "platform:channelID"
+	if strings.HasPrefix(sessionKey, "qq:g:") {
+		parts := strings.SplitN(sessionKey, ":", 3)
+		if len(parts) == 3 {
+			return parts[2]
+		}
+	}
 	parts := strings.SplitN(sessionKey, ":", 3)
 	if len(parts) >= 2 {
 		return parts[1]

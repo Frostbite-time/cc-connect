@@ -255,7 +255,9 @@ func (p *Platform) handleMessage(payload map[string]any) {
 	}
 
 	var sessionKey string
+	var channelKey string
 	if msgType == "group" {
+		channelKey = strconv.FormatInt(groupID, 10)
 		if p.shareSessionInChannel {
 			sessionKey = fmt.Sprintf("qq:g:%d", groupID)
 		} else {
@@ -296,6 +298,7 @@ func (p *Platform) handleMessage(payload map[string]any) {
 		Images:       images,
 		Audio:        audio,
 		ExtraContent: extraContent,
+		ChannelKey:   channelKey,
 		ReplyCtx:     rctx,
 	}
 
@@ -813,7 +816,7 @@ func (p *Platform) buildQuoteContext(replyID string) string {
 	if summary == "" {
 		return fmt.Sprintf("[引用消息解析失败]\n引用消息ID: %s\n原因: 被引用消息内容为空或暂不支持解析", replyID)
 	}
-	return "[引用消息]\n" + summary
+	return fmt.Sprintf("[引用消息]\n引用消息ID: %s\n%s", replyID, summary)
 }
 
 func summarizeQuotedMessage(msg map[string]any) string {

@@ -7603,6 +7603,7 @@ func TestExtractChannelID(t *testing.T) {
 		{"plain", ""},
 		{"a:b", "b"},
 		{"a:b:c:d", "b"},
+		{"qq:g:1048048028", "1048048028"},
 	}
 	for _, tt := range tests {
 		got := extractChannelID(tt.key)
@@ -7624,6 +7625,7 @@ func TestBuildSenderPrompt_DifferentPlatforms(t *testing.T) {
 		{"telegram", "telegram:group99:alice", "group99"},
 		{"discord", "discord:server1:bob", "server1"},
 		{"slack", "slack:C012345:carol", "C012345"},
+		{"qq", "qq:g:1048048028", "1048048028"},
 	}
 	for _, tc := range platforms {
 		result := e.buildSenderPrompt("msg", "uid", "TestUser", tc.platform, tc.sessionKey)

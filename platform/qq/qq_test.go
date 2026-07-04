@@ -394,9 +394,26 @@ func TestHandleMessage_QQQuoteContextFromGetMsg(t *testing.T) {
 	if msg.Content != "现在这条" {
 		t.Fatalf("Content = %q, want 现在这条", msg.Content)
 	}
-	want := "[引用消息]\n发送者: bob-card (8)\n内容: 被引用的消息"
+	want := "[引用消息]\n引用消息ID: 99\n发送者: bob-card (8)\n内容: 被引用的消息"
 	if msg.ExtraContent != want {
 		t.Fatalf("ExtraContent = %q, want %q", msg.ExtraContent, want)
+	}
+}
+
+func TestHandleMessage_QQGroupMessageIncludesChannelKey(t *testing.T) {
+	handled := make(chan *core.Message, 1)
+	p := newQQTestPlatform(func(_ core.Platform, msg *core.Message) {
+		handled <- msg
+	})
+	p.groupNameCache.Store("1048048028", "Test Group")
+
+	p.handleMessage(qqPayload(1, 1048048028, 7, "alice", []any{
+		qqText("hello"),
+	}))
+
+	msg := receiveQQMessage(t, handled)
+	if msg.ChannelKey != "1048048028" {
+		t.Fatalf("ChannelKey = %q, want 1048048028", msg.ChannelKey)
 	}
 }
 
