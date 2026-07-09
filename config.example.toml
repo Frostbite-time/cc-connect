@@ -1285,6 +1285,8 @@ app_secret = "your-feishu-app-secret"
 # token = ""                       # optional: access_token / 可选鉴权 token
 # allow_from = "*"                 # allowed QQ user IDs, e.g. "12345,67890" or "*" for all
 #                                  # 允许的 QQ 号，如 "12345,67890"，"*" 表示所有
+# allow_chat = "*"                 # allowed QQ group IDs, e.g. "123456,789012" or "*" for all groups
+#                                  # 允许的 QQ 群号，如 "123456,789012"，"*" 表示所有群；不影响私聊
 # group_reply_all = true            # default true preserves existing QQ behavior; set false to require @bot in groups
 #                                  # 默认 true 保持现有 QQ 行为；设为 false 后群聊必须 @机器人 才响应
 # group_context_messages = 0        # when group_reply_all=false, include up to N recent non-trigger group messages; 0 disables

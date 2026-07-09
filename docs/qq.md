@@ -64,6 +64,7 @@ type = "qq"
 ws_url = "ws://127.0.0.1:3001"  # NapCat 正向 WebSocket 地址
 token = ""                       # 可选：Access Token（需与 NapCat 一致）
 allow_from = "*"                 # 允许交互的 QQ 号，"*" 表示所有人
+allow_chat = "*"                 # 允许交互的 QQ 群号，"*" 表示所有群；不影响私聊
 group_reply_all = false           # false: 群聊必须 @机器人 才响应；true: 群聊所有消息都响应
 group_context_messages = 10       # @触发时附带最近 N 条未发送过的群消息；0 表示禁用
 group_context_max_chars = 2000    # 最近群消息上下文最大字符数；0 表示不限制
@@ -74,6 +75,12 @@ quote_context = false             # true: 用户引用 QQ 消息时，通过 get
 - `"*"` — 允许所有人 / Allow everyone
 - `"12345"` — 仅允许 QQ 号 12345 / Only allow QQ user 12345
 - `"12345,67890"` — 允许多个 QQ 号 / Allow multiple QQ users
+
+**`allow_chat` 配置说明 / `allow_chat` options:**
+- `"*"` — 允许所有群聊 / Allow all groups
+- `"123456"` — 仅允许 QQ 群 123456 / Only allow QQ group 123456
+- `"123456,789012"` — 允许多个 QQ 群 / Allow multiple QQ groups
+- 仅过滤群聊消息；私聊仍由 `allow_from` 控制 / Only filters group messages; private chats are still controlled by `allow_from`
 
 ### 4. 启动 / Start
 

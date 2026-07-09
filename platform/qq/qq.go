@@ -29,6 +29,7 @@ type Platform struct {
 	wsURL                 string // e.g. "ws://127.0.0.1:3001"
 	token                 string // optional access_token
 	allowFrom             string // comma-separated user IDs or "*"
+	allowChat             string // comma-separated group IDs or "*"
 	groupReplyAll         bool
 	shareSessionInChannel bool
 	groupContextMessages  int
@@ -69,6 +70,7 @@ func New(opts map[string]any) (core.Platform, error) {
 	}
 	token, _ := opts["token"].(string)
 	allowFrom, _ := opts["allow_from"].(string)
+	allowChat, _ := opts["allow_chat"].(string)
 	groupReplyAll := true
 	if v, ok := opts["group_reply_all"].(bool); ok {
 		groupReplyAll = v
@@ -89,6 +91,7 @@ func New(opts map[string]any) (core.Platform, error) {
 		wsURL:                 wsURL,
 		token:                 token,
 		allowFrom:             allowFrom,
+		allowChat:             allowChat,
 		groupReplyAll:         groupReplyAll,
 		shareSessionInChannel: shareSessionInChannel,
 		groupContextMessages:  groupContextMessages,
@@ -223,6 +226,10 @@ func (p *Platform) handleMessage(payload map[string]any) {
 	}
 
 	if !p.isAllowed(userID) {
+		return
+	}
+	if msgType == "group" && !core.AllowList(p.allowChat, strconv.FormatInt(groupID, 10)) {
+		slog.Debug("qq: message from unauthorized group", "group_id", groupID)
 		return
 	}
 

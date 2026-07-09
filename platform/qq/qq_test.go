@@ -70,6 +70,19 @@ func TestNew_WithAllowFrom(t *testing.T) {
 	}
 }
 
+func TestNew_WithAllowChat(t *testing.T) {
+	p, err := New(map[string]any{
+		"allow_chat": "100,200",
+	})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	platform := p.(*Platform)
+	if platform.allowChat != "100,200" {
+		t.Errorf("allowChat = %q, want %q", platform.allowChat, "100,200")
+	}
+}
+
 func TestNew_ShareSessionInChannel(t *testing.T) {
 	p, err := New(map[string]any{
 		"share_session_in_channel": true,
@@ -269,6 +282,47 @@ func TestReadLoopKeepsReadingDuringGroupInfoLookup(t *testing.T) {
 	}
 }
 
+func TestHandleMessage_QQAllowChatFiltersGroupMessages(t *testing.T) {
+	handled := make(chan *core.Message, 1)
+	p := newQQTestPlatform(func(_ core.Platform, msg *core.Message) {
+		handled <- msg
+	})
+	p.allowChat = "100,200"
+
+	p.handleMessage(qqPayload(1, 300, 7, "alice", []any{
+		qqText("blocked group"),
+	}))
+	select {
+	case msg := <-handled:
+		t.Fatalf("unexpected message handled: %+v", msg)
+	default:
+	}
+
+	p.handleMessage(qqPayload(2, 200, 7, "alice", []any{
+		qqText("allowed group"),
+	}))
+	msg := receiveQQMessage(t, handled)
+	if msg.SessionKey != "qq:200:7" {
+		t.Fatalf("SessionKey = %q, want qq:200:7", msg.SessionKey)
+	}
+}
+
+func TestHandleMessage_QQAllowChatDoesNotFilterPrivateMessages(t *testing.T) {
+	handled := make(chan *core.Message, 1)
+	p := newQQTestPlatform(func(_ core.Platform, msg *core.Message) {
+		handled <- msg
+	})
+	p.allowChat = "100"
+
+	p.handleMessage(qqPrivatePayload(1, 7, "alice", []any{
+		qqText("private message"),
+	}))
+	msg := receiveQQMessage(t, handled)
+	if msg.SessionKey != "qq:7" {
+		t.Fatalf("SessionKey = %q, want qq:7", msg.SessionKey)
+	}
+}
+
 func TestHandleMessage_QQGroupRequiresMentionWhenReplyAllDisabled(t *testing.T) {
 	handled := make(chan *core.Message, 1)
 	p := newQQTestPlatform(func(_ core.Platform, msg *core.Message) {
@@ -455,6 +509,7 @@ func newQQTestPlatform(handler core.MessageHandler) *Platform {
 		handler:       handler,
 	}
 	p.groupNameCache.Store(strconv.FormatInt(100, 10), "Test Group")
+	p.groupNameCache.Store(strconv.FormatInt(200, 10), "Allowed Group")
 	return p
 }
 
@@ -475,6 +530,20 @@ func qqPayload(messageID, groupID, userID int64, userName string, message []any)
 		"message_type": "group",
 		"message_id":   float64(messageID),
 		"group_id":     float64(groupID),
+		"user_id":      float64(userID),
+		"time":         float64(time.Now().Unix()),
+		"sender": map[string]any{
+			"nickname": userName,
+		},
+		"message": message,
+	}
+}
+
+func qqPrivatePayload(messageID, userID int64, userName string, message []any) map[string]any {
+	return map[string]any{
+		"post_type":    "message",
+		"message_type": "private",
+		"message_id":   float64(messageID),
 		"user_id":      float64(userID),
 		"time":         float64(time.Now().Unix()),
 		"sender": map[string]any{
